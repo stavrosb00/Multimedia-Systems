@@ -1,15 +1,42 @@
 import numpy as np
-import scipy as sp
+import scipy.fft as sp
 import matplotlib.pyplot as plt
 from scipy.io.wavfile import read
 from scipy.io.wavfile import write
 from frame import *
 from nothing import *
 
+# utility fun
+def signaltonoise(a, axis=0, ddof=0):
+    """
+    The signal-to-noise ratio of the input data.
+    Returns the signal-to-noise ratio of `a`, here defined as the mean
+    divided by the standard deviation.
+    Parameters
+    ----------
+    a : array_like
+        An array_like object containing the sample data.
+    axis : int or None, optional
+        If axis is equal to None, the array is first ravel'd. If axis is an
+        integer, this is the axis over which to operate. Default is 0.
+    ddof : int, optional
+        Degrees of freedom correction for standard deviation. Default is 0.
+    Returns
+    -------
+    s2n : ndarray
+        The mean to standard deviation ratio(s) along `axis`, or 0 where the
+        standard deviation is 0.
+    """
+    a = np.asanyarray(a)
+    m = a.mean(axis)
+    sd = a.std(axis=axis, ddof=ddof)
+    return np.where(sd == 0, 0, m/sd)
+
 def Hz2Barks(f):
     bark = 13 * np.arctan(0.00076 * f) + 3.5 * np.arctan( np.power(f / 7500, 2))
     return bark
 
+#LEVEL 3.1 FUNCTIONS 
 def make_mp3_analysisfb(h, M):
     L = h.shape[0]
     H = np.ndarray([L, M])
@@ -30,7 +57,7 @@ def make_mp3_synthesisfb(h, M):
 def get_column_fourier(H):
     Hf = np.ndarray(H.shape, dtype = np.cdouble)
     for i in range(Hf.shape[1]):
-        Hf[:, i] = sp.fft.fft(H[:, i])
+        Hf[:, i] = sp.fft(H[:, i])
     return Hf
 
 def plot_in_hz_in_db_units(Hf):
@@ -56,7 +83,7 @@ def plot_in_barks_in_db_units(Hf):
         plt.plot(barksXaxis, [10*np.log10(x ** 2 + y ** 2) for x, y in zip(realPart, imagPart)])
     plt.show()
 
-def codec0(wavin, h, M, N):
+def coder0(wavin, h, M, N):
     subwavinsTotal = wavin.shape[0]//(M*N)
     Ytot = np.ndarray([N * subwavinsTotal, M])
     H = make_mp3_analysisfb(h, M)
@@ -67,8 +94,10 @@ def codec0(wavin, h, M, N):
         Y = frame_sub_analysis(subwav, H, N)
         Yc = donothing(Y)
         Ytot[i*N:(i+1)*N, :] = Yc
+    
+    return Ytot
 
-    #######################################
+def decoder0(Ytot, h, M, N):
     G = make_mp3_synthesisfb(h, M)
     buffSize = M * N
     totalSize = Ytot.shape[0] * Ytot.shape[1]
@@ -80,6 +109,18 @@ def codec0(wavin, h, M, N):
 
     return xhat
 
+def codec0(wavin, h, M, N):
+    #4 early steps
+    Ytot = coder0(wavin, h, M, N)
+    #2 last steps
+    xhat = decoder0(Ytot, h, M, N)
+    
+    return xhat, Ytot
+##################
+# LEVEL 3.2 FUNCTIONS DCT-IV
+# https://docs.scipy.org/doc/scipy/tutorial/fft.html#type-iv-dct
+
+#LEVEL 3.1 FILTERBANK EXECUTION
 # 1-3
 fs = 44100
 M = 32
@@ -94,6 +135,34 @@ Hf = get_column_fourier(H)
 # 4
 wavin = read("myfile.wav")
 wavin = np.array(wavin[1],dtype=float)
-xhat = codec0(wavin, h, M, N)
+
+xhat, Ytot = codec0(wavin, h, M, N)
 xhatscaled = np.int16(xhat / np.max(np.abs(xhat)) * 32767)
 write("testDec1.wav", fs, xhatscaled)
+
+# error projection
+
+fig1 = plt.figure(1)
+ax1 = fig1.gca()
+plt.subplot(1, 2, 1)
+plt.plot(wavin)
+plt.title("MyFile Wavin")
+plt.subplot(1, 2, 2)
+plt.plot(xhatscaled)
+plt.title("Decoded Wavin")
+plt.show()
+
+error = wavin - xhat
+e_snr = signaltonoise(error)
+# print(e_snr)
+
+fig2 = plt.figure(2)
+ax2 = fig2.gca()
+plt.title("Error between input and decoded wavin file(SNR = %1.7f)" %e_snr)
+plt.plot(error)
+plt.show()
+
+
+
+
+#LEVEL 3.2 DCT IV EXECUTION
