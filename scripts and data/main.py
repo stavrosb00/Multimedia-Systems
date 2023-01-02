@@ -88,9 +88,10 @@ def coder0(wavin, h, M, N):
     Ytot = np.ndarray([N * subwavinsTotal, M])
     H = make_mp3_analysisfb(h, M)
 
+    wavin = np.append(wavin, [0 for _ in range(512)])  # padded
+
     for i in range(subwavinsTotal):
-        subwav = wavin[i*M*N:(i+1)*(M*N)]
-        subwav = np.append([0 for _ in range(511)], subwav) # zero padding for linear convolution
+        subwav = wavin[i*(M*N):i*M*N + M*(N-1)+512]
         Y = frame_sub_analysis(subwav, H, N)
         Yc = donothing(Y)
         Ytot[i*N:(i+1)*N, :] = Yc
@@ -103,7 +104,7 @@ def decoder0(Ytot, h, M, N):
     totalSize = Ytot.shape[0] * Ytot.shape[1]
     xhat = np.ndarray([totalSize])
     for i in range(Ytot.shape[0]//N):
-        Yc = Ytot[i*N:(i+1)*N, :]
+        Yc = Ytot[i*N:(i+1)*N + h.shape[0] // M, :]
         Yh = idonothing(Yc)
         xhat[i*buffSize : (i+1)*buffSize] = frame_sub_synthesis(Yh, G)
 
@@ -137,30 +138,30 @@ wavin = read("myfile.wav")
 wavin = np.array(wavin[1],dtype=float)
 
 xhat, Ytot = codec0(wavin, h, M, N)
-xhatscaled = np.int16(xhat / np.max(np.abs(xhat)) * 32767)
-write("testDec1.wav", fs, xhatscaled)
+xhatscaled = np.int16(xhat * 32767 / np.max(np.abs(xhat)))
+write("testDec2.wav", fs, xhatscaled)
 
 # error projection
 
 fig1 = plt.figure(1)
 ax1 = fig1.gca()
 plt.subplot(1, 2, 1)
-plt.plot(wavin)
+plt.plot(wavin[0:2000])
 plt.title("MyFile Wavin")
 plt.subplot(1, 2, 2)
-plt.plot(xhatscaled)
+plt.plot(xhatscaled[0: 2000])
 plt.title("Decoded Wavin")
 plt.show()
 
-error = wavin - xhat
-e_snr = signaltonoise(error)
+#error = wavin - xhat
+#e_snr = signaltonoise(error)
 # print(e_snr)
 
-fig2 = plt.figure(2)
-ax2 = fig2.gca()
-plt.title("Error between input and decoded wavin file(SNR = %1.7f)" %e_snr)
-plt.plot(error)
-plt.show()
+#fig2 = plt.figure(2)
+#ax2 = fig2.gca()
+#plt.title("Error between input and decoded wavin file(SNR = %1.7f)" %e_snr)
+#plt.plot(error)
+#plt.show()
 
 
 
