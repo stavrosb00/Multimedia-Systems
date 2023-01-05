@@ -1,36 +1,11 @@
 import numpy as np
 import scipy.fft as sp
+from scipy.sparse import coo_matrix
 import matplotlib.pyplot as plt
 from scipy.io.wavfile import read
 from scipy.io.wavfile import write
 from frame import *
 from nothing import *
-
-# utility fun
-def signaltonoise(a, axis=0, ddof=0):
-    """
-    The signal-to-noise ratio of the input data.
-    Returns the signal-to-noise ratio of `a`, here defined as the mean
-    divided by the standard deviation.
-    Parameters
-    ----------
-    a : array_like
-        An array_like object containing the sample data.
-    axis : int or None, optional
-        If axis is equal to None, the array is first ravel'd. If axis is an
-        integer, this is the axis over which to operate. Default is 0.
-    ddof : int, optional
-        Degrees of freedom correction for standard deviation. Default is 0.
-    Returns
-    -------
-    s2n : ndarray
-        The mean to standard deviation ratio(s) along `axis`, or 0 where the
-        standard deviation is 0.
-    """
-    a = np.asanyarray(a)
-    m = a.mean(axis)
-    sd = a.std(axis=axis, ddof=ddof)
-    return np.where(sd == 0, 0, m/sd)
 
 def Hz2Barks(f):
     bark = 13 * np.arctan(0.00076 * f) + 3.5 * np.arctan( np.power(f / 7500, 2))
@@ -93,6 +68,11 @@ def coder0(wavin, h, M, N):
     for i in range(subwavinsTotal):
         subwav = wavin[i*(M*N):i*M*N + M*(N-1)+512]
         Y = frame_sub_analysis(subwav, H, N)
+        c = frameDCT(Y)
+        ST_init(c, Dksparse(M*N-1)) ######!!!!!!!!!!
+        #print(len(c))
+        tempY = iframeDCT(c)
+        #print(tempY.shape)
         Yc = donothing(Y)
         Ytot[i*N:(i+1)*N, :] = Yc
     
@@ -113,6 +93,7 @@ def decoder0(Ytot, h, M, N):
 def codec0(wavin, h, M, N):
     #4 early steps
     Ytot = coder0(wavin, h, M, N)
+    #print(Ytot.shape)
     #2 last steps
     xhat = decoder0(Ytot, h, M, N)
     
@@ -120,6 +101,68 @@ def codec0(wavin, h, M, N):
 ##################
 # LEVEL 3.2 FUNCTIONS DCT-IV
 # https://docs.scipy.org/doc/scipy/tutorial/fft.html#type-iv-dct
+def frameDCT(Y):
+    #36x32
+    tempC = np.ndarray(Y.shape)
+    for i in range(Y.shape[1]):
+        tempC[:, i] = sp.dct(Y[:, i], type = 4)
+    c = tempC.flatten('F')
+    #print(c)
+    return c
+
+def iframeDCT(c):
+    M = 32
+    N = 36
+    tempC = np.reshape(c, (N, M), 'F')
+    Yh = np.ndarray((N, M))
+    for i in range(M):
+        Yh[:, i] = sp.idct(tempC[:, i], type = 4)
+    #print(Yh)
+    return Yh
+
+# LEVEL 3.3 PSYCHOACOUSTIC MODEL 
+
+def DCTpower(c):
+    #sxesh 10
+    P = 10 * np.log10(np.power(c, 2))
+    return P
+
+def Dksparse(Kmax):
+    matrix = np.zeros([Kmax, Kmax])
+    for k in range(Kmax):
+        if 2 <= k and k < 282:
+            matrix[k][k-2] = 1
+            matrix[k][k+2] = 1
+        elif 282 <= k and k < 570:
+            for n in range(2, 14):
+                matrix[k][k-n] = 1
+                matrix[k][k+n] = 1
+        elif 570 <= k and k < Kmax:
+            for n in range(2, 28):
+                matrix[k][k - n] = 1
+                if k+n < Kmax:
+                    matrix[k][k + n] = 1
+
+    D = coo_matrix(matrix)
+    return D
+
+def ST_init(c, D):
+    P = DCTpower(c)
+    ST = np.array([])
+    for i in range(2, c.shape[0]-1):
+        sparserow = D.getrow(i).nonzero()
+        _, indices = sparserow
+        isTonalComponent = True
+        if P[i] <= P[i - 1] or P[i] <= P[i + 1]: isTonalComponent = False
+        for idx in indices:
+            if P[i] <= P[idx] + 7: isTonalComponent = False
+
+        if isTonalComponent:
+            ST = np.append(ST, i)
+
+    print(ST)
+    return ST
+
 
 #LEVEL 3.1 FILTERBANK EXECUTION
 # 1-3
@@ -138,32 +181,53 @@ wavin = read("myfile.wav")
 wavin = np.array(wavin[1],dtype=float)
 
 xhat, Ytot = codec0(wavin, h, M, N)
-xhatscaled = np.int16(xhat * 32767 / np.max(np.abs(xhat)))
+xhatscaled = np.int16(xhat *  32767 / np.max(np.abs(xhat)))
+#xhatscaled = xhatscaled * max(wavin)/max(xhatscaled)
 write("testDec2.wav", fs, xhatscaled)
 
+xhatscaled = read("testDec2.wav")
+xhatscaled = np.array(xhatscaled[1],dtype=float)
+xhatscaled = xhatscaled * np.max(np.abs(wavin)) / np.max(np.abs(xhatscaled))
+#print(xhatscaled.shape)
+#print(wavin.shape)
+
+allRhos = np.ndarray((1000,1))
+
+for i in range(1000):
+    shifted_xhat = np.roll(xhatscaled, i)
+    rho = np.corrcoef(wavin, shifted_xhat)
+    #print(rho)
+    allRhos[i] = rho[0][1]
+
+    #rho[0][1]
+
+maxRhoIdx = np.argmax(allRhos)
+#print(maxRhoIdx, allRhos[maxRhoIdx])
+shifted_xhat = np.roll(xhatscaled, maxRhoIdx )
+error = wavin - shifted_xhat
+#error = wavin - xhatscaled
+
+powS = np.mean(np.power(shifted_xhat, 2))
+powN = np.mean(np.power(error, 2))
+#print(powS, powN)
+snr = 10*np.log10((powS-powN)/powN)
 # error projection
 
 fig1 = plt.figure(1)
 ax1 = fig1.gca()
-plt.subplot(1, 2, 1)
-plt.plot(wavin[0:2000])
+plt.subplot(2, 1, 1)
+plt.plot(wavin[4000:4100])
 plt.title("MyFile Wavin")
-plt.subplot(1, 2, 2)
-plt.plot(xhatscaled[0: 2000])
-plt.title("Decoded Wavin")
+plt.subplot(2, 1, 2)
+plt.plot(shifted_xhat[4000:4100])
+plt.title("Decoded Shifted Wavin")
 plt.show()
 
-#error = wavin - xhat
-#e_snr = signaltonoise(error)
-# print(e_snr)
-
-#fig2 = plt.figure(2)
-#ax2 = fig2.gca()
-#plt.title("Error between input and decoded wavin file(SNR = %1.7f)" %e_snr)
-#plt.plot(error)
-#plt.show()
-
-
-
+fig2 = plt.figure(2)
+ax2 = fig2.gca()
+plt.title("Error between input and decoded wavin file(SNR = %1.5f dB)" %snr)
+plt.plot(error[4000:4100])
+plt.show()
 
 #LEVEL 3.2 DCT IV EXECUTION
+
