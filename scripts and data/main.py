@@ -119,25 +119,25 @@ def coder0(wavin, h, M, N):
     for i in range(subwavinsTotal):
         subwav = wavin[i * (M * N):i * M * N + M * (N - 1) + 512]
         Y = frame_sub_analysis(subwav, H, N)
-        c = frameDCT(Y)
-        ########################################################################
+        # c = frameDCT(Y)
+        # ########################################################################
 
-        D = Dksparse(M * N - 1)
-        Tg = psycho(c, D)
-        cb = critical_bands(M*N)
-        cs, sc = DCT_band_scale(c)
+        # D = Dksparse(M * N - 1)
+        # Tg = psycho(c, D)
+        # cb = critical_bands(M*N)
+        # cs, sc = DCT_band_scale(c)
 
-        b = 2
-        symb_index = quantizer(cs, b)
-        # plt.plot(symb_index)
-        # plt.show()
+        # b = 2
+        # symb_index = quantizer(cs, b)
+        # # plt.plot(symb_index)
+        # # plt.show()
 
-        xh = dequantizer(symb_index, b)
-        # plt.plot(xh)
-        # plt.show()
+        # xh = dequantizer(symb_index, b)
+        # # plt.plot(xh)
+        # # plt.show()
 
-        #######################################################
-        tempY = iframeDCT(c)
+        # #######################################################
+        # tempY = iframeDCT(c)
         Yc = donothing(Y)
         Ytot[i * N:(i + 1) * N, :] = Yc
 
@@ -472,6 +472,7 @@ wavin = np.array(wavin[1], dtype=float)
 xhat, Ytot = codec0(wavin, h, M, N)
 xhatscaled = np.int16(xhat * 32767 / np.max(np.abs(xhat)))
 # xhatscaled = xhatscaled * max(wavin)/max(xhatscaled)
+#print(type(xhatscaled[2]))
 write("testDec2.wav", fs, xhatscaled)
 
 xhatscaled = read("testDec2.wav")
@@ -493,12 +494,14 @@ for i in range(1000):
 maxRhoIdx = np.argmax(allRhos)
 # print(maxRhoIdx, allRhos[maxRhoIdx])
 shifted_xhat = np.roll(xhatscaled, maxRhoIdx)
+
+
 error = wavin - shifted_xhat
 # error = wavin - xhatscaled
 
 powS = np.mean(np.power(shifted_xhat, 2))
 powN = np.mean(np.power(error, 2))
-# print(powS, powN)
+print(powS, powN)
 snr = 10 * np.log10((powS - powN) / powN)
 # error projection
 
@@ -517,5 +520,10 @@ ax2 = fig2.gca()
 plt.title("Error between input and decoded wavin file(SNR = %1.5f dB)" % snr)
 plt.plot(error[4000:4100])
 plt.show()
+
+
+shifted_xhat = np.int16(shifted_xhat * 32767 / np.max(np.abs(shifted_xhat)))
+#print(type(shifted_xhat[2]))
+write("testDec3.wav", fs, shifted_xhat)
 
 # LEVEL 3.2 DCT IV EXECUTION
