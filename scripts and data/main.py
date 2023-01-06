@@ -1,4 +1,3 @@
-import numpy
 import numpy as np
 import scipy.fft as sp
 from scipy.sparse import coo_matrix
@@ -120,22 +119,25 @@ def coder0(wavin, h, M, N):
     for i in range(subwavinsTotal):
         subwav = wavin[i * (M * N):i * M * N + M * (N - 1) + 512]
         Y = frame_sub_analysis(subwav, H, N)
-        ########################################################################
         c = frameDCT(Y)
-        st = ST_init(c, Dksparse(M * N - 1))  ######!!!!!!!!!!
+        ########################################################################
 
-        MaskPower(c, st) ##!!!
+        D = Dksparse(M * N - 1)
+        Tg = psycho(c, D)
+        cb = critical_bands(M*N)
+        cs, sc = DCT_band_scale(c)
 
-        Tq = np.load('Tq.npy', allow_pickle=True) ### apo edw load Tq
-        Tq = Tq.flatten()
-        for j in range(Tq.shape[0]):
-            if np.isnan(Tq[j]):
-                Tq[j] = 0                           #### ews edw
+        b = 2
+        symb_index = quantizer(cs, b)
+        # plt.plot(symb_index)
+        # plt.show()
 
-        STr, PMr = STreduction(st, c, Tq)
-        Sf = SpreadFunc(STr, PMr,M * N - 1)
-        tempY = iframeDCT(c)
+        xh = dequantizer(symb_index, b)
+        # plt.plot(xh)
+        # plt.show()
+
         #######################################################
+        tempY = iframeDCT(c)
         Yc = donothing(Y)
         Ytot[i * N:(i + 1) * N, :] = Yc
 
@@ -276,17 +278,180 @@ def STreduction(ST, c, Tq):
                 rightIdx = rightIdx + 1
 
     STr = STr.astype(int)
-    PMr = DCTpower(c[STr])
+    PMr = MaskPower(c, STr)
     return STr, PMr
 
 def SpreadFunc(ST, PM,Kmax):
     # δίνει στην έξοδο τον πίνακα Sf διάστασης
     # (max + 1) × length(ST) έτσι ώστε η j στήλη του να περιέχει τις τιμές του spreading function
     # για το σύνολο των διακριτών συχνοτήτων i = 0, . . . ,Kmax.
- 
-    
+    Sf = np.zeros([Kmax+1, ST.shape[0]])
+    fs = 44100
+    for colIdx in range(ST.shape[0]):
+        zfk = Hz2Barks(ST[colIdx] * fs / (2 * (Kmax + 1)))
+        for rowIdx in range(Kmax+1):
+            zfi = Hz2Barks(rowIdx* fs / (2 * (Kmax + 1)))
+            dz = zfi - zfk
+            if -3 <= dz and dz < -1:
+                Sf[rowIdx][colIdx] = 17*dz - 0.4*PM[colIdx] + 11
+            elif -1 <= dz and dz < 0:
+                Sf[rowIdx][colIdx] = (0.4*PM[colIdx] + 6)*dz
+            elif 0 <= dz and dz < 1:
+                Sf[rowIdx][colIdx] = -17*dz
+            elif 1 <= dz and dz < 8:
+                Sf[rowIdx][colIdx] = (0.15*PM[colIdx]-17)*dz - 0.15*PM[colIdx]
 
     return Sf
+
+def Masking_Thresholds(ST, PM, Kmax):
+    Sf = SpreadFunc(ST, PM, Kmax)
+    TM = np.zeros([Kmax+1, ST.shape[0]])
+
+    for colIdx in range(ST.shape[0]):
+        zfk = Hz2Barks(ST[colIdx] * fs / (2 * (Kmax + 1)))
+        for rowIdx in range(Kmax+1):
+            TM[rowIdx][colIdx] = PM[colIdx] - 0.275*zfk + Sf[rowIdx][colIdx] - 6.025
+
+    return TM
+
+def Global_Masking_Thresholds(Ti, Tq):
+    Tg = np.ndarray(Tq.shape)
+    for i in range(Tq.shape[0]):
+        val = 0
+        for maskerIdx in range(Ti.shape[1]):
+            val = val + 10**(0.1*Ti[i][maskerIdx])
+        val = 10*np.log10(10**(0.1*Tq[i]) + val)
+        Tg[i] = val
+
+    return Tg
+
+def psycho(c, D):
+    Tq = np.load('Tq.npy', allow_pickle=True)
+    Tq = Tq.flatten()
+    for j in range(Tq.shape[0]):
+        if np.isnan(Tq[j]):
+            Tq[j] = 0
+
+    Kmax = Tq.shape[0] - 1
+    st = ST_init(c, D)
+    STr, PMr = STreduction(st, c, Tq)
+    Ti = Masking_Thresholds(STr, PMr, Kmax)
+    Tg = Global_Masking_Thresholds(Ti, Tq)
+
+    return Tg
+
+# LEVEL 3.4 QUANTIZER FUNCTIONS
+def critical_bands(K):
+    fs = 44100
+    cb = np.ndarray([K])
+    for idx in range(K):
+        fidx = idx * 44100 / (2*K)
+        if 0 <= fidx and fidx < 100:
+            cb[idx] = 0
+        elif 100 <= fidx and fidx < 200:
+            cb[idx] = 1
+        elif 200 <= fidx and fidx < 300:
+            cb[idx] = 2
+        elif 300 <= fidx and fidx < 400:
+            cb[idx] = 3
+        elif 400 <= fidx and fidx < 510:
+            cb[idx] = 4
+        elif 510 <= fidx and fidx < 630:
+            cb[idx] = 5
+        elif 630 <= fidx and fidx < 770:
+            cb[idx] = 6
+        elif 770 <= fidx and fidx < 920:
+            cb[idx] = 7
+        elif 920 <= fidx and fidx < 1080:
+            cb[idx] = 8
+        elif 1080 <= fidx and fidx < 1270:
+            cb[idx] = 9
+        elif 1270 <= fidx and fidx < 1480:
+            cb[idx] = 10
+        elif 1480 <= fidx and fidx < 1720:
+            cb[idx] = 11
+        elif 1720 <= fidx and fidx < 2000:
+            cb[idx] = 12
+        elif 2000 <= fidx and fidx < 2320:
+            cb[idx] = 13
+        elif 2320 <= fidx and fidx < 2700:
+            cb[idx] = 14
+        elif 2700 <= fidx and fidx < 3150:
+            cb[idx] = 15
+        elif 3150 <= fidx and fidx < 3700:
+            cb[idx] = 16
+        elif 3700 <= fidx and fidx < 4400:
+            cb[idx] = 17
+        elif 4400 <= fidx and fidx < 5300:
+            cb[idx] = 18
+        elif 5300 <= fidx and fidx < 6400:
+            cb[idx] = 19
+        elif 6400 <= fidx and fidx < 7700:
+            cb[idx] = 20
+        elif 7700 <= fidx and fidx < 9500:
+            cb[idx] = 21
+        elif 9500 <= fidx and fidx < 12000:
+            cb[idx] = 22
+        elif 12000 <= fidx and fidx < 15500:
+            cb[idx] = 23
+        elif 15500 <= fidx:
+            cb[idx] = 24
+
+    return cb.astype(int)
+
+def DCT_band_scale(c):
+    #Να κατασκευάσετε τη συνάρτηση cs, sc = DCT_band_scale(c) που δέχεται σαν είσοδο τους
+    #συντελεστές DCT ενός frame και παράγει τους κανονικοποιημένους συντελεστές ˜c(i) και τα scale
+    #factors, ένα για κάθε critical band.
+    bandsTotal = 25
+    cb = critical_bands(c.shape[0])
+    cs = np.ndarray(c.shape[0])
+    sc = np.ndarray([bandsTotal])
+    bandIdx = 0
+    idx = 0
+    while bandIdx < bandsTotal:
+        maxval = -np.inf
+        while idx < 1152 and cb[idx] == bandIdx:
+            if maxval < np.power(np.abs(c[idx]), 3/4): maxval = np.power(np.abs(c[idx]), 3/4)
+            idx = idx + 1
+
+        sc[bandIdx] = maxval
+        bandIdx = bandIdx + 1
+
+    for idx in range(cs.shape[0]):
+        cs[idx] = np.sign(c[idx])*(np.power(np.abs(c[idx]), 3/4))/(sc[cb[idx]])
+
+    return cs, sc
+
+def quantizer(x, b):
+    symb_index = np.ndarray(x.shape[0])
+    levelsTotal = 2**b - 1
+    wb = 1 / levelsTotal
+    for symbidx in range(x.shape[0]):
+        for i in range(levelsTotal):
+            if(i*wb <= np.abs(x[symbidx]) and np.abs(x[symbidx]) <= (i+1)*wb):
+                if(x[symbidx] > 0): symb_index[symbidx] = i
+                else: symb_index[symbidx] = -i
+
+    return symb_index
+
+def dequantizer(symb_index, b):
+    xh = np.ndarray(symb_index.shape[0])
+    levelsTotal = 2**b - 1
+    wb = 1 / levelsTotal
+    center_wb = wb/2
+    for symbIdx in range(symb_index.shape[0]):
+        for i in range(levelsTotal):
+            if(symb_index[symbIdx] == 0):
+                xh[symbIdx] = 0
+            elif symb_index[symbIdx] > 0:
+                xh[symbIdx] = symb_index[symbIdx]*wb + center_wb
+            elif symb_index[symbIdx] < 0:
+                xh[symbIdx] = symb_index[symbIdx]*wb - center_wb    
+    
+    return xh
+# Να κατασκευάσετε τη συνάρτηση xh = dequantizer(symb_index, b) που αντιστρέφει την προηγούμενη.
+
 
 # LEVEL 3.1 FILTERBANK EXECUTION
 # 1-3
