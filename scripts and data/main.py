@@ -1,6 +1,5 @@
 import numpy as np
 import scipy.fft as sp
-from scipy.sparse import coo_matrix
 import matplotlib.pyplot as plt
 from scipy.io.wavfile import read
 from scipy.io.wavfile import write
@@ -8,11 +7,26 @@ from frame import *
 from nothing import *
 
 def Hz2Barks(f):
+    """
+    Converting Hertz to Barks 
+    Params:
+        f: Hertz
+    Returns:
+        bark
+    """
     bark = 13 * np.arctan(0.00076 * f) + 3.5 * np.arctan( np.power(f / 7500, 2))
     return bark
 
-#LEVEL 3.1 FUNCTIONS 
+#LEVEL 3.1 FILTERBANK FUNCTIONS 
 def make_mp3_analysisfb(h, M):
+    """
+    Analyse the filterbank to M bands
+    Params:
+        h: Base function with L length of low pass filter
+        M: bands to split
+    Returns:
+        H matrix LxM analysis filters per band(M collumns)
+    """
     L = h.shape[0]
     H = np.ndarray([L, M])
     for rowIdx in range(L):
@@ -21,6 +35,14 @@ def make_mp3_analysisfb(h, M):
     return H
 
 def make_mp3_synthesisfb(h, M):
+    """
+    Compute the synthesis functions of filterbank for M bands
+    Params:
+        h: Base function with L length of low pass filter
+        M: bands to split
+    Returns:
+        G matrix LxM synthesis filters per band(col)
+    """
     H = make_mp3_analysisfb(h, M)
     G = H
     for colIdx in range(M):
@@ -30,12 +52,26 @@ def make_mp3_synthesisfb(h, M):
     return G
 
 def get_column_fourier(H):
+    """
+    Compute the Fast Fourier transformation of H matrix per each band
+    Params:
+        H: matrix LxM analysis filters per band(M collumns)
+    Returns:
+        Hf Fourier transformation of H matrix
+    """
     Hf = np.ndarray(H.shape, dtype = np.cdouble)
     for i in range(Hf.shape[1]):
         Hf[:, i] = sp.fft(H[:, i])
     return Hf
 
 def plot_in_hz_in_db_units(Hf):
+    """
+    Plotting M filters of Hf matrix based on Frequency x-axis
+    Params:
+        Hf: Fourier transformation of H matrix
+    Returns:
+        -
+    """
     fs = 44100
     fstep = fs/512
     frequencyXaxis = [x*fstep for x in range(0, 255)]
@@ -47,6 +83,13 @@ def plot_in_hz_in_db_units(Hf):
     plt.show()
 
 def plot_in_barks_in_db_units(Hf):
+    """
+    Plotting M filters of Hf matrix based on Barks x-axis
+    Params:
+        Hf: Fourier transformation of H matrix
+    Returns:
+        -
+    """
     fs = 44100
     fstep = fs / 512
     frequencyXaxis = [x * fstep for x in range(0, 255)]
@@ -68,11 +111,12 @@ def coder0(wavin, h, M, N):
     for i in range(subwavinsTotal):
         subwav = wavin[i*(M*N):i*M*N + M*(N-1)+512]
         Y = frame_sub_analysis(subwav, H, N)
-        c = frameDCT(Y)
-        ST_init(c, Dksparse(M*N-1)) ######!!!!!!!!!!
-        #print(len(c))
-        tempY = iframeDCT(c)
-        #print(tempY.shape)
+        if i == 100:
+            print(Y)
+            c = frameDCT(Y)
+            #print(len(c))
+            tempY = iframeDCT(c)
+            #print(tempY.shape)
         Yc = donothing(Y)
         Ytot[i*N:(i+1)*N, :] = Yc
     
@@ -128,41 +172,8 @@ def DCTpower(c):
     return P
 
 def Dksparse(Kmax):
-    matrix = np.zeros([Kmax, Kmax])
-    for k in range(Kmax):
-        if 2 <= k and k < 282:
-            matrix[k][k-2] = 1
-            matrix[k][k+2] = 1
-        elif 282 <= k and k < 570:
-            for n in range(2, 14):
-                matrix[k][k-n] = 1
-                matrix[k][k+n] = 1
-        elif 570 <= k and k < Kmax:
-            for n in range(2, 28):
-                matrix[k][k - n] = 1
-                if k+n < Kmax:
-                    matrix[k][k + n] = 1
 
-    D = coo_matrix(matrix)
     return D
-
-def ST_init(c, D):
-    P = DCTpower(c)
-    ST = np.array([])
-    for i in range(2, c.shape[0]-1):
-        sparserow = D.getrow(i).nonzero()
-        _, indices = sparserow
-        isTonalComponent = True
-        if P[i] <= P[i - 1] or P[i] <= P[i + 1]: isTonalComponent = False
-        for idx in indices:
-            if P[i] <= P[idx] + 7: isTonalComponent = False
-
-        if isTonalComponent:
-            ST = np.append(ST, i)
-
-    print(ST)
-    return ST
-
 
 #LEVEL 3.1 FILTERBANK EXECUTION
 # 1-3
@@ -188,8 +199,8 @@ write("testDec2.wav", fs, xhatscaled)
 xhatscaled = read("testDec2.wav")
 xhatscaled = np.array(xhatscaled[1],dtype=float)
 xhatscaled = xhatscaled * np.max(np.abs(wavin)) / np.max(np.abs(xhatscaled))
-#print(xhatscaled.shape)
-#print(wavin.shape)
+print(xhatscaled.shape)
+print(wavin.shape)
 
 allRhos = np.ndarray((1000,1))
 
@@ -202,14 +213,14 @@ for i in range(1000):
     #rho[0][1]
 
 maxRhoIdx = np.argmax(allRhos)
-#print(maxRhoIdx, allRhos[maxRhoIdx])
+print(maxRhoIdx, allRhos[maxRhoIdx])
 shifted_xhat = np.roll(xhatscaled, maxRhoIdx )
 error = wavin - shifted_xhat
 #error = wavin - xhatscaled
 
 powS = np.mean(np.power(shifted_xhat, 2))
 powN = np.mean(np.power(error, 2))
-#print(powS, powN)
+print(powS, powN)
 snr = 10*np.log10((powS-powN)/powN)
 # error projection
 
@@ -230,4 +241,3 @@ plt.plot(error[4000:4100])
 plt.show()
 
 #LEVEL 3.2 DCT IV EXECUTION
-
