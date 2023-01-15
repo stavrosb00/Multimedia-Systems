@@ -6,6 +6,7 @@ from scipy.io.wavfile import read
 from scipy.io.wavfile import write
 from frame import *
 from nothing import *
+import time
 
 
 def Hz2Barks(f):
@@ -116,16 +117,50 @@ def coder0(wavin, h, M, N):
 
     wavin = np.append(wavin, [0 for _ in range(512)])  # padded
 
+    cb = critical_bands(M*N)
+    
+    D = Dksparse(M * N - 1)
+
     for i in range(subwavinsTotal):
         subwav = wavin[i * (M * N):i * M * N + M * (N - 1) + 512]
         Y = frame_sub_analysis(subwav, H, N)
-        # c = frameDCT(Y)
+        # print(Y.shape)
+        # print(type(Y[1][1]))
+        print(i)
+        # start = time.time()
+        c = frameDCT(Y)
+        # end = time.time()
+        # print(end - start)
         # ########################################################################
 
-        # D = Dksparse(M * N - 1)
-        # Tg = psycho(c, D)
-        # cb = critical_bands(M*N)
-        # cs, sc = DCT_band_scale(c)
+        # start = time.time()
+        Tg = psycho(c, D)
+        # end = time.time()
+        # print(end - start)
+
+        # start = time.time()
+        symb_index, SF,B = all_bands_quantizer(c, Tg)
+        # end = time.time()
+        # print(end - start)
+
+        # start = time.time()
+        xh = all_bands_dequantizer(symb_index, B, SF)
+        # end = time.time()
+        # print(end - start)
+
+        # plt.plot(c)
+        # plt.plot(xh)
+        # plt.show()
+        # print(c)
+        # print(xh)
+
+        # print(symb_index)
+        # plt.plot(symb_index)
+        # plt.show()
+
+        # print(SF)
+        # print("bits")
+        # print(B)
 
         # b = 2
         # symb_index = quantizer(cs, b)
@@ -137,7 +172,9 @@ def coder0(wavin, h, M, N):
         # # plt.show()
 
         # #######################################################
-        # tempY = iframeDCT(c)
+        tempY = iframeDCT(xh)
+        Y = tempY
+        ###############
         Yc = donothing(Y)
         Ytot[i * N:(i + 1) * N, :] = Yc
 
@@ -151,6 +188,12 @@ def decoder0(Ytot, h, M, N):
     xhat = np.ndarray([totalSize])
     for i in range(Ytot.shape[0] // N):
         Yc = Ytot[i * N:(i + 1) * N + h.shape[0] // M, :]
+        # if i == 100:
+        #     print(Yc.shape)
+        #     xTemp = frame_sub_synthesis(Yc, G)
+        #     print(xTemp.shape)
+        #     print(type(xTemp[1]))
+
         Yh = idonothing(Yc)
         xhat[i * buffSize: (i + 1) * buffSize] = frame_sub_synthesis(Yh, G)
 
@@ -326,6 +369,9 @@ def Global_Masking_Thresholds(Ti, Tq):
     return Tg
 
 def psycho(c, D):
+    print("I am psycho")
+    start = time.time()
+
     Tq = np.load('Tq.npy', allow_pickle=True)
     Tq = Tq.flatten()
     for j in range(Tq.shape[0]):
@@ -333,11 +379,28 @@ def psycho(c, D):
             Tq[j] = 0
 
     Kmax = Tq.shape[0] - 1
-    st = ST_init(c, D)
-    STr, PMr = STreduction(st, c, Tq)
-    Ti = Masking_Thresholds(STr, PMr, Kmax)
-    Tg = Global_Masking_Thresholds(Ti, Tq)
+    end = time.time()
+    print(end - start)
 
+    start = time.time()
+    st = ST_init(c, D)
+    end = time.time()
+    print(end - start)
+
+    start = time.time()
+    STr, PMr = STreduction(st, c, Tq)
+    end = time.time()
+    print(end - start)
+
+    start = time.time()
+    Ti = Masking_Thresholds(STr, PMr, Kmax)
+    end = time.time()
+    print(end - start)
+
+    start = time.time()
+    Tg = Global_Masking_Thresholds(Ti, Tq)
+    end = time.time()
+    print(end - start)
     return Tg
 
 # LEVEL 3.4 QUANTIZER FUNCTIONS
@@ -436,6 +499,7 @@ def quantizer(x, b):
     return symb_index
 
 def dequantizer(symb_index, b):
+    # Να κατασκευάσετε τη συνάρτηση xh = dequantizer(symb_index, b) που αντιστρέφει την προηγούμενη.
     xh = np.ndarray(symb_index.shape[0])
     levelsTotal = 2**b - 1
     wb = 1 / levelsTotal
@@ -450,14 +514,97 @@ def dequantizer(symb_index, b):
                 xh[symbIdx] = symb_index[symbIdx]*wb - center_wb    
     
     return xh
-# Να κατασκευάσετε τη συνάρτηση xh = dequantizer(symb_index, b) που αντιστρέφει την προηγούμενη.
 
+def all_bands_quantizer(c, Tg):
+    # (α) ένα διάνυσμα
+    # με τα αντίστοιχα σύμβολα κβαντισμού (ακέραιους όπως αυτούς της quantizer()), (β) τους scale
+    # factors SF (που παράγονται από τηνDCT_band_scale()) και (γ) τον αριθμό των bits που χρησιμοποίησε
+    # ο κβαντιστής σε κάθε critical band.
+    # c 1152
+    # Tg 1152
+    cb = critical_bands(c.shape[0])
+
+    cs, sc = DCT_band_scale(c)
+    b = 1
+    symb_index_all = np.ndarray(c.shape[0])
+
+    c_all = np.ndarray(c.shape[0])
+
+    B = np.ndarray(sc.shape[0])
+
+    for bandId in range(sc.shape[0]):
+        bandsDisbanded = np.where(cb == bandId)
+        bandsDisbanded = bandsDisbanded[0]
+        b = 1
+        while True:
+            
+            symb_index = quantizer(cs[bandsDisbanded], b)
+            c_tone = dequantizer(symb_index, b)
+            cs_tone = np.sign(c_tone)*(np.power(np.abs(c_tone) * sc[bandId], 4/3))
+            err = np.abs(c[bandsDisbanded] - cs_tone)
+            Pb = 10 * np.log10(np.power(err, 2))
+            if (Pb <= Tg[bandsDisbanded]).all():
+                symb_index_all[bandsDisbanded] = symb_index  
+                break
+            b = b + 1
+
+        B[bandId] = b
+    return symb_index_all, sc, B.astype(int)
+
+def all_bands_dequantizer(symb_index,B, SF):
+    bandsTotal = SF.shape[0]
+    cb = critical_bands(symb_index.shape[0])
+    xh = np.ndarray(symb_index.shape[0])
+
+    for bandId in range(bandsTotal):
+        bandsDisbanded = np.where(cb == bandId)
+        bandsDisbanded = bandsDisbanded[0].astype(int)
+        c_tone = dequantizer(symb_index[bandsDisbanded], B[bandId])
+        xh[bandsDisbanded] = np.sign(c_tone)*(np.power(np.abs(c_tone) * SF[bandId], 4/3))
+    # Denormalized c = xh
+    return xh
+
+
+# UTILITIES 
+def zerosPrinter(arr):
+    nz_arr = np.count_nonzero(arr)
+    z_arr = arr.size - nz_arr
+    print(f"Total size: {arr.size}")
+    print(f"number of non-zero: {nz_arr}" )
+    print(f"number of zeros: {z_arr}")  
+    return z_arr
+
+def plotterV1(wavin, shifted_xhat, start, end):
+    error = wavin - shifted_xhat
+    # error = wavin - xhatscaled
+    powS = np.mean(np.power(shifted_xhat, 2))
+    powN = np.mean(np.power(error, 2))
+    print(powS, powN)
+    snr = 10 * np.log10((powS - powN) / powN)
+    # error projection
+
+    fig1 = plt.figure(1)
+    ax1 = fig1.gca()
+    plt.subplot(2, 1, 1)
+    plt.plot(wavin[start:end])
+    plt.title("MyFile Wavin")
+    plt.subplot(2, 1, 2)
+    plt.plot(shifted_xhat[start:end])
+    plt.title("Decoded Shifted Wavin")
+    plt.show()
+
+    fig2 = plt.figure(2)
+    ax2 = fig2.gca()
+    plt.title("Error between input and decoded wavin file(SNR = %1.5f dB)" % snr)
+    plt.plot(error[start:end])
+    plt.show()
 
 # LEVEL 3.1 FILTERBANK EXECUTION
 # 1-3
 fs = 44100
 M = 32
 N = 36
+# ((N-1) + L/M)*M = 51x32 = 1632
 data_h = np.load('h.npy', allow_pickle=True)
 h = data_h[()]['h']
 H = make_mp3_analysisfb(h, M)
@@ -468,18 +615,77 @@ Hf = get_column_fourier(H)
 # 4
 wavin = read("myfile.wav")
 wavin = np.array(wavin[1], dtype=float)
+# print(type(wavin[2]))
 
 xhat, Ytot = codec0(wavin, h, M, N)
+
+start = 500
+end = 800
+
+#plotterV1(wavin, xhat, start, end) 
+# 2 * 10^6 to max se float
+
+# xhat = xhat * np.max(np.abs(wavin)) / np.max(np.abs(xhat))
+
+#plotterV1(wavin, xhat, start, end)
+
 xhatscaled = np.int16(xhat * 32767 / np.max(np.abs(xhat)))
-# xhatscaled = xhatscaled * max(wavin)/max(xhatscaled)
-#print(type(xhatscaled[2]))
+
+# print(np.max(np.abs(wavin)))
+# print(np.max(np.abs(xhatscaled)))
+# print(type(xhatscaled[2]))
+
+# plotterV1(wavin, xhatscaled, start, end)
+
 write("testDec2.wav", fs, xhatscaled)
 
 xhatscaled = read("testDec2.wav")
 xhatscaled = np.array(xhatscaled[1], dtype=float)
+
+# print("Step 2")
+# print(np.max(np.abs(wavin)))
+# print(np.max(np.abs(xhatscaled)))
+# print(type(xhatscaled[2]))
+
+# plotterV1(wavin, xhatscaled, start, end)
+
 xhatscaled = xhatscaled * np.max(np.abs(wavin)) / np.max(np.abs(xhatscaled))
+
+# print("Step 3")
+# print(np.max(np.abs(wavin)))
+# print(np.max(np.abs(xhatscaled)))
+# print(type(xhatscaled[2]))
+
+
+# 480 - (123 - 92) = 449
+#625 - 231 = 394
+zhat = zerosPrinter(xhatscaled)
+print("")
+zwavin = zerosPrinter(wavin)
+
+#plotterV1(wavin, xhatscaled, start, end)
+
+# shifter = 480
+#shifter = zhat - zwavin
+shifter = 449
+print(f"Shifter equals to: {shifter}")
+print(wavin.shape)
+wavin_shifted = np.roll(wavin, -shifter)
+wavin_shifted[wavin_shifted.shape[0]- shifter:-1] = 0
+
+# print(wavin[572])
+# print(wavin_shifted[123])
+# print(xhatscaled[123])
+# plotterV1(wavin_shifted, xhatscaled, start, end)
+
+# xhatscaled = xhatscaled + np.abs(xhatscaled[123]- wavin[572])
+
+#np.append(wavin, [0 for _ in range(shifter)])
+
+
 # print(xhatscaled.shape)
 # print(wavin.shape)
+
 
 allRhos = np.ndarray((1000, 1))
 
@@ -491,39 +697,15 @@ for i in range(1000):
 
     # rho[0][1]
 
+
 maxRhoIdx = np.argmax(allRhos)
-# print(maxRhoIdx, allRhos[maxRhoIdx])
+print(maxRhoIdx, allRhos[maxRhoIdx])
 shifted_xhat = np.roll(xhatscaled, maxRhoIdx)
 
-
-error = wavin - shifted_xhat
-# error = wavin - xhatscaled
-
-powS = np.mean(np.power(shifted_xhat, 2))
-powN = np.mean(np.power(error, 2))
-print(powS, powN)
-snr = 10 * np.log10((powS - powN) / powN)
-# error projection
-
-fig1 = plt.figure(1)
-ax1 = fig1.gca()
-plt.subplot(2, 1, 1)
-plt.plot(wavin[4000:4100])
-plt.title("MyFile Wavin")
-plt.subplot(2, 1, 2)
-plt.plot(shifted_xhat[4000:4100])
-plt.title("Decoded Shifted Wavin")
-plt.show()
-
-fig2 = plt.figure(2)
-ax2 = fig2.gca()
-plt.title("Error between input and decoded wavin file(SNR = %1.5f dB)" % snr)
-plt.plot(error[4000:4100])
-plt.show()
+plotterV1(wavin, shifted_xhat, start, end)
 
 
 shifted_xhat = np.int16(shifted_xhat * 32767 / np.max(np.abs(shifted_xhat)))
-#print(type(shifted_xhat[2]))
 write("testDec3.wav", fs, shifted_xhat)
 
 # LEVEL 3.2 DCT IV EXECUTION
