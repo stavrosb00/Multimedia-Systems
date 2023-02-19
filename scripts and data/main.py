@@ -10,8 +10,7 @@ import time
 from heapq import heappush, heappop, heapify
 from collections import Counter
 
-
-
+# LEVEL 3.1 FUNCTIONS
 def Hz2Barks(f):
     """
     Converting Hertz to Barks scale
@@ -23,8 +22,6 @@ def Hz2Barks(f):
     bark = 13 * np.arctan(0.00076 * f) + 3.5 * np.arctan(np.power(f / 7500, 2))
     return bark
 
-
-# LEVEL 3.1 FUNCTIONS
 def make_mp3_analysisfb(h, M):
     """
     Analyse the filterbank to M bands
@@ -89,7 +86,7 @@ def plot_in_hz_in_db_units(Hf):
 
         plt.plot(frequencyXaxis, [10 * np.log10(x ** 2 + y ** 2) for x, y in zip(realPart, imagPart)])
         plt.xlabel('Frequency(Hz)')
-        plt.ylabel('Amplitude')
+        plt.ylabel('Amplitude of filters(dB)')
     plt.show()
 
 def plot_in_barks_in_db_units(Hf):
@@ -110,7 +107,7 @@ def plot_in_barks_in_db_units(Hf):
 
         plt.plot(barksXaxis, [10 * np.log10(x ** 2 + y ** 2) for x, y in zip(realPart, imagPart)])
         plt.xlabel('Bands(Barks)')
-        plt.ylabel('Amplitude')
+        plt.ylabel('Amplitude of filters(dB)')
     plt.show()
 
 
@@ -156,10 +153,12 @@ def codec0(wavin, h, M, N):
 # LEVEL 3.2 FUNCTIONS DCT-IV
 # https://docs.scipy.org/doc/scipy/tutorial/fft.html#type-iv-dct
 def frameDCT(Y):
-    # 36x32
+    """
+    36x32
+    """
     tempC = np.ndarray(Y.shape)
     for i in range(Y.shape[1]):
-        tempC[:, i] = sp.dct(Y[:, i], type=4)
+        tempC[:, i] = sp.dct(Y[:, i],norm='ortho', type=4)
     c = tempC.flatten('F')
 
     return c
@@ -171,7 +170,7 @@ def iframeDCT(c):
     tempC = np.reshape(c, (N, M), 'F')
     Yh = np.ndarray((N, M))
     for i in range(M):
-        Yh[:, i] = sp.idct(tempC[:, i], type=4)
+        Yh[:, i] = sp.idct(tempC[:, i],norm='ortho', type=4)
 
     return Yh
 
@@ -272,6 +271,9 @@ def STreduction(ST, c, Tq):
     return STr, PMr
 
 def SpreadFunc(ST, PM,Kmax):
+    """
+    Return: Sf (Kmax+1)xlength(ST) where each j column contains the values of spreading function for the space of discrit frequencies i=0...Kmax
+    """
     # δίνει στην έξοδο τον πίνακα Sf διάστασης
     # (max + 1) × length(ST) έτσι ώστε η j στήλη του να περιέχει τις τιμές του spreading function
     # για το σύνολο των διακριτών συχνοτήτων i = 0, . . . ,Kmax.
@@ -316,7 +318,6 @@ def Global_Masking_Thresholds(Ti, Tq):
     return Tg
 
 def psycho(c, D):
-    # xronobora st init kai masking thresholds . eidika st init
     Tq = np.load('Tq.npy', allow_pickle=True)
     Tq = Tq.flatten()
     for j in range(Tq.shape[0]):
@@ -490,7 +491,6 @@ def all_bands_dequantizer(symb_index,B, SF):
         bandsDisbanded = bandsDisbanded[0].astype(int)
         c_tone = dequantizer(symb_index[bandsDisbanded], B[bandId])
         xh[bandsDisbanded] = np.sign(c_tone)*(np.power(np.abs(c_tone) * SF[bandId], 4/3))
-    # Denormalized c = xh
     return xh
 
 # LEVEL 3.5 RUN LENGTH ENCODING
@@ -524,10 +524,6 @@ def RLEreverse(run_symbols, K):
     return symb_index.astype(int)
 
 # LEVEL 3.6 HUFFMAN CODING
-# Επισήμανση: είναι πιθανόν το δημιουργούμενο bitstream που προκύπτει από την αλληλουχία των
-# frame_stream να είναι υπερβολικά μεγάλο για τη μνήμη του υπολογιστή σας. Σ’ αυτή την περίπτωση
-# φροντίστε να γράφετε τα αποτελέσματα κάθε κλήσης της huff() σε ένα αρχείο ascii το οποίο θα
-# διαβάζετε στη συνέχεια κατά την αποκωδικοποίηση.
 def huff(run_symbols):
     data = run_symbols.flatten()
     freq = Counter(data)
@@ -568,8 +564,6 @@ def doCompress(Y, D):
     symb_index, SF,B = all_bands_quantizer(c, Tg)
     run_symbols = RLE(symb_index, symb_index.shape[0])
     frame_stream, frame_symbol_prob = huff(run_symbols)
-
-    #Yc = []
     return SF,B, frame_stream, frame_symbol_prob
 
 
@@ -585,14 +579,10 @@ def MP3cod(wavin, h, M, N):
     subwavinsTotal = wavin.shape[0] // (M * N)
     Ytot = np.ndarray([N * subwavinsTotal, M])
     H = make_mp3_analysisfb(h, M)
-
     wavin = np.append(wavin, [0 for _ in range(512)])  # padded
-
-    #cb = critical_bands(M*N)
 
     K = M*N
     D = Dksparse(K - 1)
-    #Ncb = 25 #number of critical bands
     for i in range(subwavinsTotal):
         subwav = wavin[i * (M * N):i * M * N + M * (N - 1) + 512]
         Y = frame_sub_analysis(subwav, H, N)
@@ -629,19 +619,10 @@ def MP3codec(wavin, h, M, N):
 
 
 
-# UTILITIES 
-def zerosPrinter(arr):
-    nz_arr = np.count_nonzero(arr)
-    z_arr = arr.size - nz_arr
-    print(f"Total size: {arr.size}")
-    print(f"number of non-zero: {nz_arr}" )
-    print(f"number of zeros: {z_arr}")  
-    return z_arr
-
-def plotterV1(wavin, shifted_xhat, start, end):
-    error = wavin - shifted_xhat
-    # error = wavin - xhatscaled
-    powS = np.mean(np.power(shifted_xhat, 2))
+# UTILITIES FUNCTIONS
+def plotterV1(wavin, xhat, start, end):
+    error = wavin - xhat
+    powS = np.mean(np.power(xhat, 2))
     powN = np.mean(np.power(error, 2))
     print(powS, powN)
     snr = 10 * np.log10((powS - powN) / powN)
@@ -653,7 +634,7 @@ def plotterV1(wavin, shifted_xhat, start, end):
     plt.plot(wavin[start:end])
     plt.title("MyFile Wavin")
     plt.subplot(2, 1, 2)
-    plt.plot(shifted_xhat[start:end])
+    plt.plot(xhat[start:end])
     plt.title("Decoded Shifted Wavin")
     plt.show()
 
@@ -663,7 +644,7 @@ def plotterV1(wavin, shifted_xhat, start, end):
     plt.plot(error[start:end])
     plt.show()
 
-def writerV1(xhat, Ytot, wavin, start, end):
+def writerV1(xhat, wavin, start, end):
     xhatscaled = np.int16(xhat * 32767 / np.max(np.abs(xhat)))
     write("testDec2.wav", fs, xhatscaled)
 
@@ -688,6 +669,7 @@ def writerV1(xhat, Ytot, wavin, start, end):
 
 
     maxRhoIdx = np.argmax(allRhos)
+    print("Shifter   CorrCoeff")
     print(maxRhoIdx, allRhos[maxRhoIdx])
     shifted_xhat = np.roll(xhatscaled, maxRhoIdx)
 
@@ -696,7 +678,7 @@ def writerV1(xhat, Ytot, wavin, start, end):
     write("testDec3.wav", fs, shifted_xhat)
 
 
-def writerV2(xhat2, Ytot2, wavin, start, end):
+def writerV2(xhat2, wavin, start, end):
     xhatscaled2 = np.int16(xhat2 * 32767 / np.max(np.abs(xhat2)))
     write("testMP3Dec2.wav", fs, xhatscaled2)
 
@@ -720,6 +702,7 @@ def writerV2(xhat2, Ytot2, wavin, start, end):
 
 
     maxRhoIdx = np.argmax(allRhos)
+    print("Shifter   CorrCoeff")
     print(maxRhoIdx, allRhos[maxRhoIdx])
     shifted_xhat = np.roll(xhatscaled2, maxRhoIdx)
 
@@ -748,11 +731,11 @@ plot_in_barks_in_db_units(Hf)
 wavin = read("myfile.wav")
 wavin = np.array(wavin[1], dtype=float)
 xhat, Ytot = codec0(wavin, h, M, N)
-writerV1(xhat, Ytot, wavin, start, end)
+writerV1(xhat, wavin, start, end)
 
 # FINAL MP3 COMPOSITION AND EXECUTION OF MODELS
 xhat2, Ytot2 = MP3codec(wavin, h, M, N)
-writerV2(xhat2, Ytot2, wavin, start, end)
+writerV2(xhat2, wavin, start, end)
 
 
 
