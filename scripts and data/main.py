@@ -1,6 +1,5 @@
 import numpy as np
 import scipy.fft as sp
-#from scipy.sparse import coo_matrix
 from scipy.sparse import csr_matrix
 import matplotlib.pyplot as plt
 from scipy.io.wavfile import read
@@ -8,6 +7,9 @@ from scipy.io.wavfile import write
 from frame import *
 from nothing import *
 import time
+from heapq import heappush, heappop, heapify
+from collections import Counter
+from itertools import groupby
 
 
 def Hz2Barks(f):
@@ -519,12 +521,92 @@ def RLEreverse(run_symbols, K):
 
 # LEVEL 3.6 HUFFMAN CODING
 
-#frame_stream, frame_symbol_prob = huff (run_symbols)
+#huffman_encoded, huffman_codes = huffman_encode(rle_string)
+# Επισήμανση: είναι πιθανόν το δημιουργούμενο bitstream που προκύπτει από την αλληλουχία των
+# frame_stream να είναι υπερβολικά μεγάλο για τη μνήμη του υπολογιστή σας. Σ’ αυτή την περίπτωση
+# φροντίστε να γράφετε τα αποτελέσματα κάθε κλήσης της huff() σε ένα αρχείο ascii το οποίο θα
+# διαβάζετε στη συνέχεια κατά την αποκωδικοποίηση.
+
+def binary_to_ascii(binary_data):
+    ascii_data = []
+    for i in range(0, len(binary_data), 8):
+        chunk = binary_data[i:i+8]
+        ascii_data.append(int(chunk, 2))
+    return bytes(ascii_data)
+
+def ascii_to_binary(ascii_data):
+    binary_data = ""
+    for byte in ascii_data:
+        binary_data += format(byte, "08b")
+    return binary_data
+
+# ascii_data = binary_to_ascii(huffman_encoded)
+        # with open("encoded_data.txt", "wb") as f:
+        #     f.write(ascii_data)
 
 
-#run_symbols = ihuff (frame_stream, frame_symbol_prob)
+        # # Read the encoded data back from the file and decode it
+        # with open("encoded_data.txt", "rb") as f:
+        #     ascii_data = f.read()
+        # binary_data = ascii_to_binary(ascii_data)
+
+def huff(run_symbols):
+    data = run_symbols.flatten()
+    freq = Counter(data)
+    heap = [[weight, [symbol, ""]] for symbol, weight in freq.items()]
+    heapify(heap)
+    while len(heap) > 1:
+        low = heappop(heap)
+        high = heappop(heap)
+        for pair in low[1:]:
+            pair[1] = '0' + pair[1]
+        for pair in high[1:]:
+            pair[1] = '1' + pair[1]
+        heappush(heap, [low[0] + high[0]] + low[1:] + high[1:])
+    frame_symbol_prob = dict(sorted(heappop(heap)[1:], key=lambda p: (len(p[-1]), p)))
+    frame_stream = ''.join([frame_symbol_prob[symbol] for symbol in data])
+    return frame_stream, frame_symbol_prob
+
+
+def ihuff(frame_stream, frame_symbol_prob):
+    R = []
+    code = ''
+    for bit in frame_stream:
+        code += bit
+        for symbol, value in frame_symbol_prob.items():
+            if value == code:
+                R = np.append(R, symbol)
+                code = ''
+                break
+    
+    run_symbols = np.reshape(R, (-1, 2))
+    return run_symbols.astype(int)
 
 # TOTAL COMPOSITION OF MP3
+def doCompress(Y, D):
+    # EDW PERA EINAI AUTA THS donothing STHN MP3COD MERIA
+    c = frameDCT(Y)
+    Tg = psycho(c, D)
+    Tg = Tg - 15
+    symb_index, SF,B = all_bands_quantizer(c, Tg)
+    run_symbols = RLE(symb_index, symb_index.shape[0])
+    frame_stream, frame_symbol_prob = huff(run_symbols)
+
+    #Yc = []
+    return SF,B, frame_stream, frame_symbol_prob
+
+# STO ENDIAMESO Ytotal 8ELW TRANSFER DATA GIA : o pinakas B, SF , frame_stream, frame_symbol_prob
+def inverseDoCompress(SF, B, frame_stream, frame_symbol_prob, K):
+    # EDW PERA EINAI AUTA THS idonothing STHN MP3DECODER MERIA
+    
+    run_symbols = ihuff(frame_stream, frame_symbol_prob)
+    
+    symb_index = RLEreverse(run_symbols, K)
+
+    xh = all_bands_dequantizer(symb_index, B, SF)
+    tempY = iframeDCT(xh)
+    Yh = tempY
+    return Yh
 
 def MP3cod(wavin, h, M, N):
     subwavinsTotal = wavin.shape[0] // (M * N)
@@ -535,35 +617,22 @@ def MP3cod(wavin, h, M, N):
 
     #cb = critical_bands(M*N)
 
-
-    D = Dksparse(M * N - 1)
+    K = M*N
+    D = Dksparse(K - 1)
+    #Ncb = 25 #number of critical bands
 
     for i in range(subwavinsTotal):
         subwav = wavin[i * (M * N):i * M * N + M * (N - 1) + 512]
         Y = frame_sub_analysis(subwav, H, N)
-        # print(Y.shape)
-        # print(type(Y[1][1]))
-
         # ########################################################################
         print(i)
-        c = frameDCT(Y)
-        Tg = psycho(c, D)
-        Tg = Tg - 15
-        symb_index, SF,B = all_bands_quantizer(c, Tg)
-        #print(symb_index.shape)
-        run_symbols = RLE(symb_index, symb_index.shape[0])
+        SF, B, frame_stream, frame_symbol_prob = doCompress(Y, D)
+        
+        Yc = inverseDoCompress(SF, B, frame_stream, frame_symbol_prob, K)
 
-        symb_index = RLEreverse(run_symbols, symb_index.shape[0])
-
-        xh = all_bands_dequantizer(symb_index, B, SF)
-        tempY = iframeDCT(xh)
-        Y = tempY
-        # #######################################################
-        Yc = donothing(Y)
         Ytot[i * N:(i + 1) * N, :] = Yc
 
     return Ytot
-
 
 def MP3decod(Ytot, h, M, N):
     G = make_mp3_synthesisfb(h, M)
@@ -572,11 +641,6 @@ def MP3decod(Ytot, h, M, N):
     xhat = np.ndarray([totalSize])
     for i in range(Ytot.shape[0] // N):
         Yc = Ytot[i * N:(i + 1) * N + h.shape[0] // M, :]
-        # if i == 100:
-        #     print(Yc.shape)
-        #     xTemp = frame_sub_synthesis(Yc, G)
-        #     print(xTemp.shape)
-        #     print(type(xTemp[1]))
 
         Yh = idonothing(Yc)
         xhat[i * buffSize: (i + 1) * buffSize] = frame_sub_synthesis(Yh, G)
@@ -631,7 +695,6 @@ def plotterV1(wavin, shifted_xhat, start, end):
 
 def writerV1(xhat, Ytot, wavin, start, end):
     xhatscaled = np.int16(xhat * 32767 / np.max(np.abs(xhat)))
-    # plotterV1(wavin, xhatscaled, start, end)
     write("testDec2.wav", fs, xhatscaled)
 
     xhatscaled = read("testDec2.wav")
@@ -663,7 +726,36 @@ def writerV1(xhat, Ytot, wavin, start, end):
     write("testDec3.wav", fs, shifted_xhat)
 
 
+def writerV2(xhat2, Ytot2, wavin, start, end):
+    xhatscaled2 = np.int16(xhat2 * 32767 / np.max(np.abs(xhat2)))
+    write("testMP3Dec2.wav", fs, xhatscaled2)
 
+    xhatscaled2 = read("testMP3Dec2.wav")
+    xhatscaled2 = np.array(xhatscaled2[1], dtype=float)
+
+    xhatscaled2 = xhatscaled2 * np.max(np.abs(wavin)) / np.max(np.abs(xhatscaled2))
+
+    # prin thn sysxetish
+    # plotterV1(wavin, xhatscaled, start, end)
+    # meta thn sysxetish
+    allRhos = np.ndarray((1000, 1))
+
+    for i in range(1000):
+        shifted_xhat = np.roll(xhatscaled2, i)
+        rho = np.corrcoef(wavin, shifted_xhat)
+        # print(rho)
+        allRhos[i] = rho[0][1]
+
+        # rho[0][1]
+
+
+    maxRhoIdx = np.argmax(allRhos)
+    print(maxRhoIdx, allRhos[maxRhoIdx])
+    shifted_xhat = np.roll(xhatscaled2, maxRhoIdx)
+
+    plotterV1(wavin, shifted_xhat, start, end)
+    shifted_xhat = np.int16(shifted_xhat * 32767 / np.max(np.abs(shifted_xhat)))
+    write("testMP3Dec3.wav", fs, shifted_xhat)
 
 # LEVEL 3.1 FILTERBANK EXECUTION
 # ANSWER TO 1-3
@@ -678,23 +770,18 @@ data_h = np.load('h.npy', allow_pickle=True)
 h = data_h[()]['h']
 H = make_mp3_analysisfb(h, M)
 Hf = get_column_fourier(H)
-# plot_in_hz_in_db_units(Hf)
-# plot_in_barks_in_db_units(Hf)
+plot_in_hz_in_db_units(Hf)
+plot_in_barks_in_db_units(Hf)
 
 # ANSWER TO 4
 wavin = read("myfile.wav")
 wavin = np.array(wavin[1], dtype=float)
-# print(type(wavin[2]))
 xhat, Ytot = codec0(wavin, h, M, N)
 writerV1(xhat, Ytot, wavin, start, end)
 
 # FINAL MP3 COMPOSITION AND EXECUTION OF MODELS
-xhat, Ytot = MP3codec(wavin, h, M, N)
-writerV1(xhat, Ytot, wavin, start, end)
-
-#writerV2()
-
-# 2 * 10^6 to max se float
+xhat2, Ytot2 = MP3codec(wavin, h, M, N)
+writerV2(xhat2, Ytot2, wavin, start, end)
 
 
 
