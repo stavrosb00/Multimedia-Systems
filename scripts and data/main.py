@@ -9,7 +9,7 @@ from nothing import *
 import time
 from heapq import heappush, heappop, heapify
 from collections import Counter
-from itertools import groupby
+
 
 
 def Hz2Barks(f):
@@ -88,6 +88,8 @@ def plot_in_hz_in_db_units(Hf):
         imagPart = [x.imag for x in Hf[:, i][0: 255]]
 
         plt.plot(frequencyXaxis, [10 * np.log10(x ** 2 + y ** 2) for x, y in zip(realPart, imagPart)])
+        plt.xlabel('Frequency(Hz)')
+        plt.ylabel('Amplitude')
     plt.show()
 
 def plot_in_barks_in_db_units(Hf):
@@ -107,6 +109,8 @@ def plot_in_barks_in_db_units(Hf):
         imagPart = [x.imag for x in Hf[:, i][0: 255]]
 
         plt.plot(barksXaxis, [10 * np.log10(x ** 2 + y ** 2) for x, y in zip(realPart, imagPart)])
+        plt.xlabel('Bands(Barks)')
+        plt.ylabel('Amplitude')
     plt.show()
 
 
@@ -520,36 +524,10 @@ def RLEreverse(run_symbols, K):
     return symb_index.astype(int)
 
 # LEVEL 3.6 HUFFMAN CODING
-
-#huffman_encoded, huffman_codes = huffman_encode(rle_string)
 # Επισήμανση: είναι πιθανόν το δημιουργούμενο bitstream που προκύπτει από την αλληλουχία των
 # frame_stream να είναι υπερβολικά μεγάλο για τη μνήμη του υπολογιστή σας. Σ’ αυτή την περίπτωση
 # φροντίστε να γράφετε τα αποτελέσματα κάθε κλήσης της huff() σε ένα αρχείο ascii το οποίο θα
 # διαβάζετε στη συνέχεια κατά την αποκωδικοποίηση.
-
-def binary_to_ascii(binary_data):
-    ascii_data = []
-    for i in range(0, len(binary_data), 8):
-        chunk = binary_data[i:i+8]
-        ascii_data.append(int(chunk, 2))
-    return bytes(ascii_data)
-
-def ascii_to_binary(ascii_data):
-    binary_data = ""
-    for byte in ascii_data:
-        binary_data += format(byte, "08b")
-    return binary_data
-
-# ascii_data = binary_to_ascii(huffman_encoded)
-        # with open("encoded_data.txt", "wb") as f:
-        #     f.write(ascii_data)
-
-
-        # # Read the encoded data back from the file and decode it
-        # with open("encoded_data.txt", "rb") as f:
-        #     ascii_data = f.read()
-        # binary_data = ascii_to_binary(ascii_data)
-
 def huff(run_symbols):
     data = run_symbols.flatten()
     freq = Counter(data)
@@ -584,7 +562,6 @@ def ihuff(frame_stream, frame_symbol_prob):
 
 # TOTAL COMPOSITION OF MP3
 def doCompress(Y, D):
-    # EDW PERA EINAI AUTA THS donothing STHN MP3COD MERIA
     c = frameDCT(Y)
     Tg = psycho(c, D)
     Tg = Tg - 15
@@ -595,14 +572,10 @@ def doCompress(Y, D):
     #Yc = []
     return SF,B, frame_stream, frame_symbol_prob
 
-# STO ENDIAMESO Ytotal 8ELW TRANSFER DATA GIA : o pinakas B, SF , frame_stream, frame_symbol_prob
-def inverseDoCompress(SF, B, frame_stream, frame_symbol_prob, K):
-    # EDW PERA EINAI AUTA THS idonothing STHN MP3DECODER MERIA
-    
-    run_symbols = ihuff(frame_stream, frame_symbol_prob)
-    
-    symb_index = RLEreverse(run_symbols, K)
 
+def inverseDoCompress(SF, B, frame_stream, frame_symbol_prob, K):
+    run_symbols = ihuff(frame_stream, frame_symbol_prob) 
+    symb_index = RLEreverse(run_symbols, K)
     xh = all_bands_dequantizer(symb_index, B, SF)
     tempY = iframeDCT(xh)
     Yh = tempY
@@ -620,12 +593,11 @@ def MP3cod(wavin, h, M, N):
     K = M*N
     D = Dksparse(K - 1)
     #Ncb = 25 #number of critical bands
-
     for i in range(subwavinsTotal):
         subwav = wavin[i * (M * N):i * M * N + M * (N - 1) + 512]
         Y = frame_sub_analysis(subwav, H, N)
         # ########################################################################
-        print(i)
+        print(f"Frame",i)
         SF, B, frame_stream, frame_symbol_prob = doCompress(Y, D)
         
         Yc = inverseDoCompress(SF, B, frame_stream, frame_symbol_prob, K)
@@ -651,10 +623,8 @@ def MP3decod(Ytot, h, M, N):
 def MP3codec(wavin, h, M, N):
     # 4 early steps
     Ytot = MP3cod(wavin, h, M, N)
-
     # 2 last steps
     xhat = MP3decod(Ytot, h, M, N)
-
     return xhat, Ytot
 
 
@@ -758,7 +728,6 @@ def writerV2(xhat2, Ytot2, wavin, start, end):
     write("testMP3Dec3.wav", fs, shifted_xhat)
 
 # LEVEL 3.1 FILTERBANK EXECUTION
-# ANSWER TO 1-3
 fs = 44100
 M = 32
 N = 36
@@ -770,6 +739,8 @@ data_h = np.load('h.npy', allow_pickle=True)
 h = data_h[()]['h']
 H = make_mp3_analysisfb(h, M)
 Hf = get_column_fourier(H)
+
+# ANSWER TO 1-3
 plot_in_hz_in_db_units(Hf)
 plot_in_barks_in_db_units(Hf)
 
