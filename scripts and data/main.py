@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.fft as sp
-from scipy.sparse import coo_matrix
+#from scipy.sparse import coo_matrix
+from scipy.sparse import csr_matrix
 import matplotlib.pyplot as plt
 from scipy.io.wavfile import read
 from scipy.io.wavfile import write
@@ -50,10 +51,7 @@ def make_mp3_synthesisfb(h, M):
         G matrix LxM synthesis filters per band(col)
     """
     H = make_mp3_analysisfb(h, M)
-    G = H
-    for colIdx in range(M):
-        for rowIdx in range(H.shape[0]):
-            G[rowIdx, colIdx] = H[rowIdx, colIdx] * (H.shape[0] - 1 - rowIdx)
+    G = np.flipud(H)
 
     return G
 
@@ -114,67 +112,11 @@ def coder0(wavin, h, M, N):
     subwavinsTotal = wavin.shape[0] // (M * N)
     Ytot = np.ndarray([N * subwavinsTotal, M])
     H = make_mp3_analysisfb(h, M)
-
     wavin = np.append(wavin, [0 for _ in range(512)])  # padded
-
-    cb = critical_bands(M*N)
-    
-    D = Dksparse(M * N - 1)
 
     for i in range(subwavinsTotal):
         subwav = wavin[i * (M * N):i * M * N + M * (N - 1) + 512]
         Y = frame_sub_analysis(subwav, H, N)
-        # print(Y.shape)
-        # print(type(Y[1][1]))
-        print(i)
-        # start = time.time()
-        c = frameDCT(Y)
-        # end = time.time()
-        # print(end - start)
-        # ########################################################################
-
-        # start = time.time()
-        Tg = psycho(c, D)
-        # end = time.time()
-        # print(end - start)
-
-        # start = time.time()
-        symb_index, SF,B = all_bands_quantizer(c, Tg)
-        # end = time.time()
-        # print(end - start)
-
-        # start = time.time()
-        xh = all_bands_dequantizer(symb_index, B, SF)
-        # end = time.time()
-        # print(end - start)
-
-        # plt.plot(c)
-        # plt.plot(xh)
-        # plt.show()
-        # print(c)
-        # print(xh)
-
-        # print(symb_index)
-        # plt.plot(symb_index)
-        # plt.show()
-
-        # print(SF)
-        # print("bits")
-        # print(B)
-
-        # b = 2
-        # symb_index = quantizer(cs, b)
-        # # plt.plot(symb_index)
-        # # plt.show()
-
-        # xh = dequantizer(symb_index, b)
-        # # plt.plot(xh)
-        # # plt.show()
-
-        # #######################################################
-        tempY = iframeDCT(xh)
-        Y = tempY
-        ###############
         Yc = donothing(Y)
         Ytot[i * N:(i + 1) * N, :] = Yc
 
@@ -188,12 +130,6 @@ def decoder0(Ytot, h, M, N):
     xhat = np.ndarray([totalSize])
     for i in range(Ytot.shape[0] // N):
         Yc = Ytot[i * N:(i + 1) * N + h.shape[0] // M, :]
-        # if i == 100:
-        #     print(Yc.shape)
-        #     xTemp = frame_sub_synthesis(Yc, G)
-        #     print(xTemp.shape)
-        #     print(type(xTemp[1]))
-
         Yh = idonothing(Yc)
         xhat[i * buffSize: (i + 1) * buffSize] = frame_sub_synthesis(Yh, G)
 
@@ -258,25 +194,30 @@ def Dksparse(Kmax):
                 if k + n < Kmax:
                     matrix[k][k + n] = 1
 
-    D = coo_matrix(matrix)
+    D = csr_matrix(matrix)
     return D
 
 
 def ST_init(c, D):
     P = DCTpower(c)
-    ST = np.array([])
+    ST = np.zeros(c.shape[0])
     for i in range(2, c.shape[0] - 1):
         sparserow = D.getrow(i).nonzero()
         _, indices = sparserow
         isTonalComponent = True
-        if P[i] <= P[i - 1] or P[i] <= P[i + 1]: isTonalComponent = False
-        for idx in indices:
-            if P[i] <= P[idx] + 7: isTonalComponent = False
-
+        if P[i] <= P[i - 1] or P[i] <= P[i + 1]: 
+            isTonalComponent = False
+        else:
+            for idx in indices:
+                if P[i] <= P[idx] + 7: 
+                    isTonalComponent = False
+                    break
+        
         if isTonalComponent:
-            ST = np.append(ST, i)
+            ST[i] = 1
 
-    return ST.astype(int)
+    ST = np.where(ST == 1)
+    return ST[0]
 
 def MaskPower(c, ST):
     P = DCTpower(c)
@@ -369,9 +310,7 @@ def Global_Masking_Thresholds(Ti, Tq):
     return Tg
 
 def psycho(c, D):
-    print("I am psycho")
-    start = time.time()
-
+    # xronobora st init kai masking thresholds . eidika st init
     Tq = np.load('Tq.npy', allow_pickle=True)
     Tq = Tq.flatten()
     for j in range(Tq.shape[0]):
@@ -379,28 +318,12 @@ def psycho(c, D):
             Tq[j] = 0
 
     Kmax = Tq.shape[0] - 1
-    end = time.time()
-    print(end - start)
 
-    start = time.time()
+
     st = ST_init(c, D)
-    end = time.time()
-    print(end - start)
-
-    start = time.time()
     STr, PMr = STreduction(st, c, Tq)
-    end = time.time()
-    print(end - start)
-
-    start = time.time()
     Ti = Masking_Thresholds(STr, PMr, Kmax)
-    end = time.time()
-    print(end - start)
-
-    start = time.time()
     Tg = Global_Masking_Thresholds(Ti, Tq)
-    end = time.time()
-    print(end - start)
     return Tg
 
 # LEVEL 3.4 QUANTIZER FUNCTIONS
@@ -564,6 +487,113 @@ def all_bands_dequantizer(symb_index,B, SF):
     # Denormalized c = xh
     return xh
 
+# LEVEL 3.5 RUN LENGTH ENCODING
+# xwrista gia ka8e frame ~ component : 1152 DCT syntelestes 
+def RLE(symb_index, K):
+    # R x 2 , 1h sthlh symbolo, 2h sthlh epanalhpsh autou sta epomena 
+    R = [[0, 0]]
+    i = 0
+    while (i <= K - 1):
+        count = 1
+        ch = symb_index[i]
+        j = i
+        while (j < K - 1):   
+            if (symb_index[j] == symb_index[j + 1]): 
+                count = count + 1
+                j = j + 1
+            else: 
+                break
+        R = np.append(R, [[ch, count]], axis=0)
+        i = j + 1
+
+    run_symbols = R[1:R.shape[0], :]
+    return run_symbols.astype(int)
+
+def RLEreverse(run_symbols, K):
+    symb_index = []
+    i = 0
+    for i in range(run_symbols.shape[0]):
+        symb_index = np.append(symb_index, [run_symbols[i][0] for _ in range(run_symbols[i][1])])
+                               
+    return symb_index.astype(int)
+
+# LEVEL 3.6 HUFFMAN CODING
+
+#frame_stream, frame_symbol_prob = huff (run_symbols)
+
+
+#run_symbols = ihuff (frame_stream, frame_symbol_prob)
+
+# TOTAL COMPOSITION OF MP3
+
+def MP3cod(wavin, h, M, N):
+    subwavinsTotal = wavin.shape[0] // (M * N)
+    Ytot = np.ndarray([N * subwavinsTotal, M])
+    H = make_mp3_analysisfb(h, M)
+
+    wavin = np.append(wavin, [0 for _ in range(512)])  # padded
+
+    #cb = critical_bands(M*N)
+
+
+    D = Dksparse(M * N - 1)
+
+    for i in range(subwavinsTotal):
+        subwav = wavin[i * (M * N):i * M * N + M * (N - 1) + 512]
+        Y = frame_sub_analysis(subwav, H, N)
+        # print(Y.shape)
+        # print(type(Y[1][1]))
+
+        # ########################################################################
+        print(i)
+        c = frameDCT(Y)
+        Tg = psycho(c, D)
+        Tg = Tg - 15
+        symb_index, SF,B = all_bands_quantizer(c, Tg)
+        #print(symb_index.shape)
+        run_symbols = RLE(symb_index, symb_index.shape[0])
+
+        symb_index = RLEreverse(run_symbols, symb_index.shape[0])
+
+        xh = all_bands_dequantizer(symb_index, B, SF)
+        tempY = iframeDCT(xh)
+        Y = tempY
+        # #######################################################
+        Yc = donothing(Y)
+        Ytot[i * N:(i + 1) * N, :] = Yc
+
+    return Ytot
+
+
+def MP3decod(Ytot, h, M, N):
+    G = make_mp3_synthesisfb(h, M)
+    buffSize = M * N
+    totalSize = Ytot.shape[0] * Ytot.shape[1]
+    xhat = np.ndarray([totalSize])
+    for i in range(Ytot.shape[0] // N):
+        Yc = Ytot[i * N:(i + 1) * N + h.shape[0] // M, :]
+        # if i == 100:
+        #     print(Yc.shape)
+        #     xTemp = frame_sub_synthesis(Yc, G)
+        #     print(xTemp.shape)
+        #     print(type(xTemp[1]))
+
+        Yh = idonothing(Yc)
+        xhat[i * buffSize: (i + 1) * buffSize] = frame_sub_synthesis(Yh, G)
+
+    return xhat
+
+
+def MP3codec(wavin, h, M, N):
+    # 4 early steps
+    Ytot = MP3cod(wavin, h, M, N)
+
+    # 2 last steps
+    xhat = MP3decod(Ytot, h, M, N)
+
+    return xhat, Ytot
+
+
 
 # UTILITIES 
 def zerosPrinter(arr):
@@ -599,12 +629,51 @@ def plotterV1(wavin, shifted_xhat, start, end):
     plt.plot(error[start:end])
     plt.show()
 
+def writerV1(xhat, Ytot, wavin, start, end):
+    xhatscaled = np.int16(xhat * 32767 / np.max(np.abs(xhat)))
+    # plotterV1(wavin, xhatscaled, start, end)
+    write("testDec2.wav", fs, xhatscaled)
+
+    xhatscaled = read("testDec2.wav")
+    xhatscaled = np.array(xhatscaled[1], dtype=float)
+
+    xhatscaled = xhatscaled * np.max(np.abs(wavin)) / np.max(np.abs(xhatscaled))
+
+    # prin thn sysxetish
+    # plotterV1(wavin, xhatscaled, start, end)
+
+    # meta thn sysxetish
+    allRhos = np.ndarray((1000, 1))
+
+    for i in range(1000):
+        shifted_xhat = np.roll(xhatscaled, i)
+        rho = np.corrcoef(wavin, shifted_xhat)
+        # print(rho)
+        allRhos[i] = rho[0][1]
+
+        # rho[0][1]
+
+
+    maxRhoIdx = np.argmax(allRhos)
+    print(maxRhoIdx, allRhos[maxRhoIdx])
+    shifted_xhat = np.roll(xhatscaled, maxRhoIdx)
+
+    plotterV1(wavin, shifted_xhat, start, end)
+    shifted_xhat = np.int16(shifted_xhat * 32767 / np.max(np.abs(shifted_xhat)))
+    write("testDec3.wav", fs, shifted_xhat)
+
+
+
+
 # LEVEL 3.1 FILTERBANK EXECUTION
-# 1-3
+# ANSWER TO 1-3
 fs = 44100
 M = 32
 N = 36
 # ((N-1) + L/M)*M = 51x32 = 1632
+start = 500
+end = 800
+
 data_h = np.load('h.npy', allow_pickle=True)
 h = data_h[()]['h']
 H = make_mp3_analysisfb(h, M)
@@ -612,100 +681,21 @@ Hf = get_column_fourier(H)
 # plot_in_hz_in_db_units(Hf)
 # plot_in_barks_in_db_units(Hf)
 
-# 4
+# ANSWER TO 4
 wavin = read("myfile.wav")
 wavin = np.array(wavin[1], dtype=float)
 # print(type(wavin[2]))
-
 xhat, Ytot = codec0(wavin, h, M, N)
+writerV1(xhat, Ytot, wavin, start, end)
 
-start = 500
-end = 800
+# FINAL MP3 COMPOSITION AND EXECUTION OF MODELS
+xhat, Ytot = MP3codec(wavin, h, M, N)
+writerV1(xhat, Ytot, wavin, start, end)
 
-#plotterV1(wavin, xhat, start, end) 
+#writerV2()
+
 # 2 * 10^6 to max se float
 
-# xhat = xhat * np.max(np.abs(wavin)) / np.max(np.abs(xhat))
-
-#plotterV1(wavin, xhat, start, end)
-
-xhatscaled = np.int16(xhat * 32767 / np.max(np.abs(xhat)))
-
-# print(np.max(np.abs(wavin)))
-# print(np.max(np.abs(xhatscaled)))
-# print(type(xhatscaled[2]))
-
-# plotterV1(wavin, xhatscaled, start, end)
-
-write("testDec2.wav", fs, xhatscaled)
-
-xhatscaled = read("testDec2.wav")
-xhatscaled = np.array(xhatscaled[1], dtype=float)
-
-# print("Step 2")
-# print(np.max(np.abs(wavin)))
-# print(np.max(np.abs(xhatscaled)))
-# print(type(xhatscaled[2]))
-
-# plotterV1(wavin, xhatscaled, start, end)
-
-xhatscaled = xhatscaled * np.max(np.abs(wavin)) / np.max(np.abs(xhatscaled))
-
-# print("Step 3")
-# print(np.max(np.abs(wavin)))
-# print(np.max(np.abs(xhatscaled)))
-# print(type(xhatscaled[2]))
 
 
-# 480 - (123 - 92) = 449
-#625 - 231 = 394
-zhat = zerosPrinter(xhatscaled)
-print("")
-zwavin = zerosPrinter(wavin)
 
-#plotterV1(wavin, xhatscaled, start, end)
-
-# shifter = 480
-#shifter = zhat - zwavin
-shifter = 449
-print(f"Shifter equals to: {shifter}")
-print(wavin.shape)
-wavin_shifted = np.roll(wavin, -shifter)
-wavin_shifted[wavin_shifted.shape[0]- shifter:-1] = 0
-
-# print(wavin[572])
-# print(wavin_shifted[123])
-# print(xhatscaled[123])
-# plotterV1(wavin_shifted, xhatscaled, start, end)
-
-# xhatscaled = xhatscaled + np.abs(xhatscaled[123]- wavin[572])
-
-#np.append(wavin, [0 for _ in range(shifter)])
-
-
-# print(xhatscaled.shape)
-# print(wavin.shape)
-
-
-allRhos = np.ndarray((1000, 1))
-
-for i in range(1000):
-    shifted_xhat = np.roll(xhatscaled, i)
-    rho = np.corrcoef(wavin, shifted_xhat)
-    # print(rho)
-    allRhos[i] = rho[0][1]
-
-    # rho[0][1]
-
-
-maxRhoIdx = np.argmax(allRhos)
-print(maxRhoIdx, allRhos[maxRhoIdx])
-shifted_xhat = np.roll(xhatscaled, maxRhoIdx)
-
-plotterV1(wavin, shifted_xhat, start, end)
-
-
-shifted_xhat = np.int16(shifted_xhat * 32767 / np.max(np.abs(shifted_xhat)))
-write("testDec3.wav", fs, shifted_xhat)
-
-# LEVEL 3.2 DCT IV EXECUTION
